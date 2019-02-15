@@ -10,6 +10,11 @@ import PIL
 import PIL.Image
 import sys
 
+from os import listdir
+from os.path import isfile, join
+from os import walk
+from shutil import copyfile
+
 try:
 	from sepconv import sepconv # the custom separable convolution layer
 except:
@@ -18,25 +23,24 @@ except:
 
 ##########################################################
 
-assert(int(str('').join(torch.__version__.split('.')[0:3])) >= 41) # requires at least pytorch version 0.4.0
+assert(int(str('').join(torch.__version__.split('.')[0:3])) >= 40) # requires at least pytorch version 0.4.0
 
 torch.set_grad_enabled(False) # make sure to not compute gradients for computational performance
 
-torch.cuda.device(1) # change this if you have a multiple graphics cards and you want to utilize them
+torch.cuda.device(0) # change this if you have a multiple graphics cards and you want to utilize them
 
 torch.backends.cudnn.enabled = True # make sure to use cudnn for computational performance
 
 ##########################################################
 
 arguments_strModel = 'lf'
-arguments_strFirst = './images/first.png'
-arguments_strSecond = './images/second.png'
-arguments_strOut = './out.png'
+arguments_strFirst = './images'
+arguments_strOut = './out'
 
 for strOption, strArgument in getopt.getopt(sys.argv[1:], '', [ strParameter[2:] + '=' for strParameter in sys.argv[1::2] ])[0]:
 	if strOption == '--model' and strArgument != '': arguments_strModel = strArgument # which model to use, l1 or lf, please see our paper for more details
-	if strOption == '--first' and strArgument != '': arguments_strFirst = strArgument # path to the first frame
-	if strOption == '--second' and strArgument != '': arguments_strSecond = strArgument # path to the second frame
+	if strOption == '--input_directory' and strArgument != '': arguments_strFirst = strArgument # path to the first frame
+	#if strOption == '--second' and strArgument != '': arguments_strSecond = strArgument # path to the second frame
 	if strOption == '--out' and strArgument != '': arguments_strOut = strArgument # path to where the output should be stored
 # end
 
@@ -118,7 +122,7 @@ class Network(torch.nn.Module):
 		self.moduleHorizontal1 = Subnet()
 		self.moduleHorizontal2 = Subnet()
 
-		self.load_state_dict(torch.load('./network-' + arguments_strModel + '.pytorch'))
+		self.load_state_dict(torch.load('./network-' + arguments_strModel + '.pytorch',map_location='cuda:0'))
 	# end
 
 	def forward(self, tensorFirst, tensorSecond):
@@ -182,8 +186,8 @@ def estimate(tensorFirst, tensorSecond):
 	intWidth = tensorFirst.size(2)
 	intHeight = tensorFirst.size(1)
 
-	assert(intWidth <= 1280) # while our approach works with larger images, we do not recommend it unless you are aware of the implications
-	assert(intHeight <= 720) # while our approach works with larger images, we do not recommend it unless you are aware of the implications
+	# assert(intWidth <= 1280) # while our approach works with larger images, we do not recommend it unless you are aware of the implications
+	# assert(intHeight <= 720) # while our approach works with larger images, we do not recommend it unless you are aware of the implications
 
 	intPaddingLeft = int(math.floor(51 / 2.0))
 	intPaddingTop = int(math.floor(51 / 2.0))
@@ -239,10 +243,27 @@ def estimate(tensorFirst, tensorSecond):
 ##########################################################
 
 if __name__ == '__main__':
-	tensorFirst = torch.FloatTensor(numpy.array(PIL.Image.open(arguments_strFirst))[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0))
-	tensorSecond = torch.FloatTensor(numpy.array(PIL.Image.open(arguments_strSecond))[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0))
+	f = []
+	for (dirpath, dirnames, filenames) in walk(arguments_strFirst):
+		f.extend(filenames)
+		break
+	i = 0
+	while i < (len(f) - 1):
+		file_name1 = str(i) + ".png";
+		file_name2 = str(i + 1) + ".png";
+		print(file_name1)
+		tensorFirst = torch.FloatTensor(numpy.array(PIL.Image.open(arguments_strFirst + "/" + file_name1))[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0))
+		tensorSecond = torch.FloatTensor(numpy.array(PIL.Image.open(arguments_strFirst + "/" + file_name2))[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0))
+		tensorOutput = estimate(tensorFirst, tensorSecond)
+		PIL.Image.fromarray((tensorOutput.clamp(0.0, 1.0).numpy().transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8)).save(arguments_strOut + "/" + str(i * 2 + 1) + ".png")
+		copyfile(arguments_strFirst + "/" + file_name1, arguments_strOut + "/" + str(i * 2) + ".png")
+		i += 1
+		
+	copyfile(arguments_strFirst + "/" + str(len(f) - 1) + ".png" , arguments_strOut + "/" + str((len(f) - 1) * 2) + ".png")
+	#tensorFirst = torch.FloatTensor(numpy.array(PIL.Image.open(arguments_strFirst))[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0))
+	#tensorSecond = torch.FloatTensor(numpy.array(PIL.Image.open(arguments_strSecond))[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0))
 
-	tensorOutput = estimate(tensorFirst, tensorSecond)
+	#tensorOutput = estimate(tensorFirst, tensorSecond)
 
-	PIL.Image.fromarray((tensorOutput.clamp(0.0, 1.0).numpy().transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8)).save(arguments_strOut)
+	#PIL.Image.fromarray((tensorOutput.clamp(0.0, 1.0).numpy().transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8)).save(arguments_strOut)
 # end
